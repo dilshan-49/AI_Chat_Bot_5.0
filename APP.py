@@ -4,6 +4,7 @@ import shutil
 import json
 from google.cloud import aiplatform
 from google.oauth2 import service_account
+from google.cloud import dialogflowcx_v3beta1
 import vertexai
 import tempfile
 import plotly.express as px
@@ -13,15 +14,33 @@ from langchain.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores.chroma import Chroma
 from langchain_google_vertexai import VertexAIEmbeddings
-from langchain.prompts import PromptTemplate
+import datetime
+import firebase_admin
+from firebase_admin import credentials, firestore
 import streamlit as st
 
 # Configurations and paths
 CHROMA_PATH = './chroma'
-GOOGLE_APPLICATION_CREDENTIALS = './vertexAIconfig.json'
+GOOGLE_APPLICATION_CREDENTIALS = './electionchatbot-config.json'
 PROJECT_ID = "electionchatbot-435710"
 LOCATION = 'us-central1'
+AGENT_ID = "5aad9da8-085f-43d5-8d17-341f385b0e2d"
 SAVE_PATH= './downloaded_files/'# Path to save the downloaded PDF
+
+diagflowClient = dialogflowcx_v3beta1.SessionsClient(credentials=GOOGLE_APPLICATION_CREDENTIALS)
+agent_id = "projects/{PROJECT_ID}/locations/{LOCATION}/agents/5aad9da8-085f-43d5-8d17-341f385b0e2d"
+session_id = "my-session"
+
+# Create a session path
+session_path = diagflowClient.session_path(agent_id, session_id)
+
+# User input
+user_input = st.text_input("Enter your message:")
+
+#if user_input:
+    # Create a query input
+
+
 #fire store pdf directory
 collection_name = 'pdfs'  # Firestore collection name
 
@@ -29,9 +48,16 @@ collection_name = 'pdfs'  # Firestore collection name
 
 # Initialize Vertex AI
 def init_vertex_ai():
-    credentials = service_account.Credentials.from_service_account_file(GOOGLE_APPLICATION_CREDENTIALS)
+    service_account_info = json.loads(st.secrets["gcp_service_account"])
+    credentials = service_account.Credentials.from_service_account_info(service_account_info)
     aiplatform.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
     vertexai.init(project=PROJECT_ID, location=LOCATION)
+
+def init_firebase():
+    # Initialize Firebase Admin SDK (adjust path to your service account key)
+    cred = credentials.Certificate("path/to/your-service-account-key.json")
+    firebase_admin.initialize_app(cred)
+    return firestore.client()
 
 # Load and split PDF documents
 def load_pdf(uploaded_files):
@@ -226,7 +252,7 @@ def query_manifiesto():
 # Analyze the chunk using your model and return the results
 def analyze_chunk(chunk, model):
     # Structured prompt for model to generate predictions
-    prompt = f"Output should be dictionary data type and give only the dictionary.dont try to give enything else and use leader's full name in dictionary. Analyze the following text and predict support percentages for each leader in the format {{'Leader Name': percentage}}:\n\n{chunk}"
+    prompt = f"Output should be dictionary data type and give only the dictionary.dont try to give enything else and use leader's full name in dictionary. Analyze the following text and predict support percentages for each leader in the format {{'Leader Name': percentage}}. Make sure you analyze all the data before prediction:\n\n{chunk}"
     prompt2=f" Analyze the following text and predict what are the trends in support for each leader and who is likely to win in presidential Election. You may use your information sources too. but prioritize these data :\n\n{chunk}"
     results = model.generate_content([prompt]).text
     results2= model.generate_content([prompt2]).text
@@ -272,52 +298,21 @@ def avg_results(results):
     return party_percentages
 
 #win predictor
-def win_predict():
+def electionNews():
     init_vertex_ai()
-    st.set_page_config(page_title='Win_Predict',page_icon='🏆',layout='wide')
-    st.header('🏆 Predict Win 🏆')
-    st.markdown('🚀 This is a tool to help you predict the winning party based on the current situation.🚀')
+    st.set_page_config(page_title='Election News',page_icon='🏆',layout='wide')
+    st.header('🏆Election News 🏆')
     
     #return button
     if st.button("Back to Main Menu 🔙", key="Back to Main Menu"):
         st.session_state.current_function = "main"
     
-    survey_pdf = st.file_uploader("Choose survey files", type="pdf", accept_multiple_files=True)
     if st.button('📈 Predict',key = 'predict'):
         if survey_pdf:
             with st.spinner("Processing...."):
                 surveys = load_pdf(survey_pdf)
 
-                predict_model = GenerativeModel("gemini-1.5-flash-001")
-                survay_results=[]
-
-                #for survey in surveys:
-                survay_result,prediction=analyze_chunk(surveys,predict_model)
-                survay_results.append(survay_result) 
-                st.write(survay_result)               
-                    #time.sleep(3)
                 
-                final_percentages =avg_results(survay_results)
-                st.success("Analysis Complete! ")
-
-                st.subheader("Winning Percentages for Each Party")
-
-                # Display the percentages as text
-                for party, percentage in final_percentages.items():
-                    st.write(f"{party}: {percentage:.2f}%")
-
-                # Create a bar chart
-                fig = px.bar(
-                    x=list(final_percentages.keys()),
-                    y=list(final_percentages.values()),
-                    labels={'x': 'Party', 'y': 'Percentage'},
-                    title="Winning Percentages for Each Party"
-                )
-
-                # Display the bar chart
-                st.plotly_chart(fig)
-                with st.container():
-                    st.write(prediction)
 
 
 def main():
@@ -357,4 +352,4 @@ if __name__ == "__main__":
     elif st.session_state.current_function == "chat_with_agent":
         chat_with_agent()
     elif st.session_state.current_function == "win predict":
-        win_predict()
+        electionNews()
